@@ -2,74 +2,94 @@ package jwsgo
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"strings"
 )
 
-var hasher = Hash256
+type hasher func(data string) []byte
 
-// SetHash set a global hash function for signing, default to:
-//
-// func Hash(key, data string) (sig []byte) {
-// 	mac := hmac.New(sha256.New, []byte(key))
-// 	mac.Write([]byte(data))
-// 	return mac.Sum(nil)
-// }
-//
-func SetHash(fn func(key, data string) []byte) {
-	if fn == nil {
-		panic("invalid hash function")
-	}
-	hasher = fn
+//New returns the jws instance with custome sign method
+func New(alg string, hash hasher) *JWS {
+	return &JWS{
+		algorithm: alg,
+		hash:      hash}
 }
 
-// Hash256 the default hash function
-func Hash256(key, data string) (sig []byte) {
-	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write([]byte(data))
-	return mac.Sum(nil)
+//NewSha256 returns the jws instance with HMAC-SHA256
+func NewSha256(key string) *JWS {
+	return &JWS{
+		algorithm:   "HS256",
+		signingHash: hmac.New(sha256.New, []byte(key)),
+	}
+}
+
+//NewSha512 returns the jws instance with HMAC-SHA256
+func NewSha512(key string) *JWS {
+	return &JWS{
+		algorithm:   "HS512",
+		signingHash: hmac.New(sha512.New, []byte(key)),
+	}
+}
+
+//NewSha384 returns the jws instance with HMAC-SHA256
+func NewSha384(key string) *JWS {
+	return &JWS{
+		algorithm:   "HS384",
+		signingHash: hmac.New(crypto.SHA384.New, []byte(key)),
+	}
+}
+
+// JWS provides a golang implementation
+// of JSON Web Signature encoding and decoding.
+// See RFC 7515.
+type JWS struct {
+	signingHash hash.Hash
+	algorithm   string
+	hash        hasher
 }
 
 // Verify Returns true or false for whether a signature matches a secret or key.
-func Verify(token, key string) (err error) {
+func (jws *JWS) Verify(token string) (err error) {
 
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return errors.New("invalid token received, token must have 3 parts")
 	}
 	signedContent := parts[0] + "." + parts[1]
-	sign1 := hasher(key, signedContent)
-	sign2, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if bytes.Compare(sign1, sign2) != 0 {
+	var newsign []byte
+	if jws.signingHash != nil {
+		jws.signingHash.Write([]byte(signedContent))
+		newsign = jws.signingHash.Sum(nil)
+		defer jws.signingHash.Reset()
+	} else {
+		newsign = jws.hash(signedContent)
+	}
+	sign, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if bytes.Compare(sign, newsign) != 0 {
 		err = errors.New("invalid data")
 	}
 	return
 }
 
-// New return a jws instance
-func New(key string) *JWS {
-	return &JWS{key: key}
+// Encode return token by the payload
+func (jws *JWS) Encode(payload *Payload) (token string, err error) {
+	header := &Header{
+		Typ:       "JWT",
+		Algorithm: jws.algorithm,
+	}
+	return jws.EncodeWith(header, payload)
 }
 
-// JWS provides a partial implementation
-// of JSON Web Signature encoding and decoding.
-// See RFC 7515.
-type JWS struct {
-	key string
-}
-
-// Verify tests whether the provided JWT token's signature was right.
-func (jws *JWS) Verify(token string) error {
-	return Verify(token, jws.key)
-}
-
-// Encode the jws header and payload return token
-func (jws *JWS) Encode(header *Header, payload *Payload) (token string, err error) {
+// EncodeWith return token by the jws header and payload
+func (jws *JWS) EncodeWith(header *Header, payload *Payload) (token string, err error) {
 	head, err := header.Encode()
 	if err != nil {
 		return
@@ -79,8 +99,14 @@ func (jws *JWS) Encode(header *Header, payload *Payload) (token string, err erro
 		return
 	}
 	signedContent := fmt.Sprintf("%s.%s", head, payloadstr)
-
-	signature := hasher(jws.key, signedContent)
+	var signature []byte
+	if jws.signingHash != nil {
+		jws.signingHash.Write([]byte(signedContent))
+		signature = jws.signingHash.Sum(nil)
+		defer jws.signingHash.Reset()
+	} else {
+		signature = jws.hash(signedContent)
+	}
 	token = fmt.Sprintf("%s.%s", signedContent, base64.RawURLEncoding.EncodeToString(signature))
 	return
 }
@@ -95,8 +121,24 @@ type Payload struct {
 	Iat   int64  `json:"iat"`             // the time the assertion was issued (seconds since Unix epoch)
 	Typ   string `json:"typ,omitempty"`   // token type (Optional).
 	// Email for which the application is requesting delegated access (Optional).
-	Sub            string                 `json:"sub,omitempty"`
-	PrivatePayload map[string]interface{} `json:"-"`
+	Sub            string `json:"sub,omitempty"`
+	privatePayload map[string]interface{}
+}
+
+// Set ...
+func (c *Payload) Set(key string, value interface{}) {
+	if c.privatePayload == nil {
+		c.privatePayload = make(map[string]interface{})
+	}
+	c.privatePayload[key] = value
+}
+
+// Get ...
+func (c *Payload) Get(key string) interface{} {
+	if c.privatePayload == nil {
+		return nil
+	}
+	return c.privatePayload[key]
 }
 
 //Encode the current payload of jwt
@@ -105,11 +147,11 @@ func (c *Payload) Encode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(c.PrivatePayload) == 0 {
+	if len(c.privatePayload) == 0 {
 		return base64.RawURLEncoding.EncodeToString(b), nil
 	}
 	// Marshal private payload set and then append it to b.
-	prv, err := json.Marshal(c.PrivatePayload)
+	prv, err := json.Marshal(c.privatePayload)
 	if err != nil {
 		return "", fmt.Errorf("invalid map of private payload")
 	}
@@ -132,8 +174,24 @@ type Header struct {
 	// Represents the token type.
 	Typ string `json:"typ"`
 	// The optional hint of which key is being used.
-	KeyID         string                 `json:"kid,omitempty"`
-	PrivateHeader map[string]interface{} `json:"-"`
+	KeyID         string `json:"kid,omitempty"`
+	privateHeader map[string]interface{}
+}
+
+// Set ...
+func (h *Header) Set(key string, value interface{}) {
+	if h.privateHeader == nil {
+		h.privateHeader = make(map[string]interface{})
+	}
+	h.privateHeader[key] = value
+}
+
+// Get ...
+func (h *Header) Get(key string) interface{} {
+	if h.privateHeader == nil {
+		return nil
+	}
+	return h.privateHeader[key]
 }
 
 //Encode the current header of jwt
@@ -145,11 +203,11 @@ func (h *Header) Encode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(h.PrivateHeader) == 0 {
+	if len(h.privateHeader) == 0 {
 		return base64.RawURLEncoding.EncodeToString(b), nil
 	}
 	// Marshal private header and then append it to b.
-	prv, err := json.Marshal(h.PrivateHeader)
+	prv, err := json.Marshal(h.privateHeader)
 	if err != nil {
 		return "", fmt.Errorf("invalid map of private header")
 	}

@@ -11,16 +11,15 @@ import (
 func TestJwsgo(t *testing.T) {
 	t.Run("jwsgo with Encode and Verify func that should be", func(t *testing.T) {
 		assert := assert.New(t)
-		header := &Header{
-			Algorithm: "HS256",
-		}
+
 		payload := &Payload{
 			Iss: "http://google.com/",
 			Exp: 3610,
 			Iat: 10,
 		}
-		jws := New("xx")
-		token, err := jws.Encode(header, payload)
+		payload.Set("userid", "3610")
+		jws := NewSha256("xx")
+		token, err := jws.Encode(payload)
 		assert.Nil(err)
 		assert.NotEmpty(token)
 
@@ -29,23 +28,23 @@ func TestJwsgo(t *testing.T) {
 	})
 	t.Run("jwso with error that should be", func(t *testing.T) {
 		assert := assert.New(t)
-		jws := New("xx")
+		jws := NewSha256("xx")
 		assert.Equal("invalid token received, token must have 3 parts", jws.Verify("token.").Error())
 	})
 	t.Run("jwso with PrivatePayload and PrivateHeader that should be", func(t *testing.T) {
 		assert := assert.New(t)
 		header := &Header{
-			Algorithm:     "HS256",
-			PrivateHeader: map[string]interface{}{"id": "mushroom"},
+			Algorithm: "HS256",
 		}
+		header.Set("id", "mushroom")
 		payload := &Payload{
-			Iss:            "http://google.com/",
-			Exp:            3610,
-			Iat:            10,
-			PrivatePayload: map[string]interface{}{"age": 18},
+			Iss: "http://google.com/",
+			Exp: 3610,
+			Iat: 10,
 		}
-		jws := New("xx")
-		token, err := jws.Encode(header, payload)
+		payload.Set("age", 18)
+		jws := NewSha256("xx")
+		token, err := jws.EncodeWith(header, payload)
 		assert.Nil(err)
 		assert.NotEmpty(token)
 
@@ -54,68 +53,105 @@ func TestJwsgo(t *testing.T) {
 	})
 	t.Run("jwso with sha1 that should be", func(t *testing.T) {
 
-		SetHash(func(key, data string) []byte {
-			h := hmac.New(sha1.New, []byte(key))
+		assert := assert.New(t)
+		header := &Header{
+			Algorithm: "HS1",
+		}
+		header.Set("id", "mushroom")
+		payload := &Payload{
+			Iss: "http://google.com/",
+			Exp: 3610,
+			Iat: 10,
+		}
+		payload.Set("age", 18)
+		jws := New("HS256", func(data string) []byte {
+			h := hmac.New(sha1.New, []byte("xx"))
 			h.Write([]byte(data))
 			return h.Sum(nil)
 		})
-
-		assert := assert.New(t)
-		header := &Header{
-			Algorithm:     "HS1",
-			PrivateHeader: map[string]interface{}{"id": "mushroom"},
-		}
-		payload := &Payload{
-			Iss:            "http://google.com/",
-			Exp:            3610,
-			Iat:            10,
-			PrivatePayload: map[string]interface{}{"age": 18},
-		}
-		jws := New("xx")
-		token, err := jws.Encode(header, payload)
+		token, err := jws.EncodeWith(header, payload)
 		assert.Nil(err)
 		assert.NotEmpty(token)
 
 		assert.Nil(jws.Verify(token))
 
-		defer func() {
-			r := recover()
-			assert.NotNil(r)
-		}()
-		SetHash(nil)
 	})
 
 	t.Run("jwso with PrivatePayload and PrivateHeader that should be", func(t *testing.T) {
 		assert := assert.New(t)
 		header := &Header{
-			Algorithm:     "HS256",
-			PrivateHeader: map[string]interface{}{"id": make(chan int, 2)},
+			Algorithm: "HS256",
 		}
+		header.Set("id", make(chan int, 2))
 		str, err := header.Encode()
 		assert.Empty(str)
 		assert.Equal("invalid map of private header", err.Error())
 
 		payload := &Payload{
-			Iss:            "http://google.com/",
-			Exp:            3610,
-			Iat:            10,
-			PrivatePayload: map[string]interface{}{"age": make(chan int, 2)},
+			Iss: "http://google.com/",
+			Exp: 3610,
+			Iat: 10,
 		}
+		payload.Set("age", make(chan int, 2))
 		str, err = payload.Encode()
 		assert.Empty(str)
 		assert.Equal("invalid map of private payload", err.Error())
 
-		jws := New("xx")
-		token, err := jws.Encode(header, payload)
+		jws := NewSha256("xx")
+		token, err := jws.EncodeWith(header, payload)
 		assert.Equal("invalid map of private header", err.Error())
 		assert.Empty(token)
 
 		header = &Header{
-			Algorithm:     "HS256",
-			PrivateHeader: map[string]interface{}{"id": 1},
+			Algorithm: "HS256",
 		}
-		token, err = jws.Encode(header, payload)
+		header.Set("id", 1)
+		token, err = jws.EncodeWith(header, payload)
 		assert.Empty(token)
 		assert.Equal("invalid map of private payload", err.Error())
+	})
+	t.Run("jwsgo with NewSha512 and NewSha384 func that should be", func(t *testing.T) {
+		assert := assert.New(t)
+
+		payload := &Payload{
+			Iss: "http://google.com/",
+			Exp: 3610,
+			Iat: 10,
+		}
+		payload.Set("userid", "3610")
+
+		assert.Equal("3610", payload.Get("userid"))
+		jws := NewSha256("xx")
+		token, err := jws.Encode(payload)
+		assert.Nil(err)
+		assert.NotEmpty(token)
+		assert.Nil(jws.Verify(token))
+
+		header := &Header{
+			Algorithm: "HS1",
+		}
+		assert.Equal(nil, header.Get("idx"))
+		header.Set("id", "mushroom")
+		assert.Equal("mushroom", header.Get("id"))
+		assert.Equal(nil, header.Get("idx"))
+
+		jws = NewSha512("xx")
+		token, err = jws.Encode(payload)
+		assert.Nil(err)
+		assert.NotEmpty(token)
+		assert.Nil(jws.Verify(token))
+
+		payload = &Payload{
+			Iss: "http://google.com/",
+			Exp: 3610,
+			Iat: 10,
+		}
+		assert.Equal(nil, payload.Get("userid"))
+		jws = NewSha384("xx")
+		token, err = jws.Encode(payload)
+		assert.Nil(err)
+		assert.NotEmpty(token)
+		assert.Nil(jws.Verify(token))
+
 	})
 }
