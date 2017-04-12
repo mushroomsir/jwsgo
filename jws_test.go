@@ -69,11 +69,11 @@ func TestJwsgo(t *testing.T) {
 			h.Write([]byte(data))
 			return h.Sum(nil)
 		})
-		token, err := jws.EncodeWith(header, payload)
-		assert.Nil(err)
-		assert.NotEmpty(token)
-
+		token, _ := jws.EncodeWith(header, payload)
 		assert.Nil(jws.Verify(token))
+
+		newpayload, _ := jws.Decode(token)
+		assert.Equal(float64(18), newpayload.Get("age"))
 
 	})
 
@@ -122,10 +122,16 @@ func TestJwsgo(t *testing.T) {
 
 		assert.Equal("3610", payload.Get("userid"))
 		jws := NewSha256("xx")
-		token, err := jws.Encode(payload)
-		assert.Nil(err)
-		assert.NotEmpty(token)
+		token, _ := jws.Encode(payload)
 		assert.Nil(jws.Verify(token))
+		newpayload, _ := jws.Decode(token)
+		assert.Equal("3610", newpayload.Get("userid"))
+
+		_, err := jws.Decode(token + ".a")
+		assert.Equal("invalid token", err.Error())
+
+		_, err = jws.Decode(token + "a")
+		assert.Equal("invalid signature", err.Error())
 
 		header := &Header{
 			Algorithm: "HS1",
@@ -136,9 +142,7 @@ func TestJwsgo(t *testing.T) {
 		assert.Equal(nil, header.Get("idx"))
 
 		jws = NewSha512("xx")
-		token, err = jws.Encode(payload)
-		assert.Nil(err)
-		assert.NotEmpty(token)
+		token, _ = jws.Encode(payload)
 		assert.Nil(jws.Verify(token))
 
 		payload = &Payload{
@@ -148,10 +152,9 @@ func TestJwsgo(t *testing.T) {
 		}
 		assert.Equal(nil, payload.Get("userid"))
 		jws = NewSha384("xx")
-		token, err = jws.Encode(payload)
-		assert.Nil(err)
-		assert.NotEmpty(token)
+		token, _ = jws.Encode(payload)
 		assert.Nil(jws.Verify(token))
-
+		newpayload, _ = jws.Decode(token)
+		assert.Equal(nil, newpayload.Get("userid"))
 	})
 }

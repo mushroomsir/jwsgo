@@ -20,7 +20,8 @@ type hasher func(data string) []byte
 func New(alg string, hash hasher) *JWS {
 	return &JWS{
 		algorithm: alg,
-		hash:      hash}
+		hash:      hash,
+	}
 }
 
 //NewSha256 returns the jws instance with HMAC-SHA256
@@ -111,6 +112,32 @@ func (jws *JWS) EncodeWith(header *Header, payload *Payload) (token string, err 
 	return
 }
 
+// Decode ...
+func (jws *JWS) Decode(token string) (payload *Payload, err error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("invalid token")
+	}
+	signedContent := parts[0] + "." + parts[1]
+	var signature []byte
+	if jws.signingHash != nil {
+		jws.signingHash.Write([]byte(signedContent))
+		signature = jws.signingHash.Sum(nil)
+		defer jws.signingHash.Reset()
+	} else {
+		signature = jws.hash(signedContent)
+	}
+	oldsig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if bytes.Compare(signature, oldsig) != 0 || err != nil {
+		return nil, errors.New("invalid signature")
+	}
+	payload = new(Payload)
+	b, err := base64.RawURLEncoding.DecodeString(parts[1])
+	err = json.Unmarshal(b, payload)
+	err = json.Unmarshal(b, &payload.privatePayload)
+	return payload, err
+}
+
 //Payload  contains information about the JWT signature including the permissions being requested (scopes),
 // the target of the token, the issuer, the time the token was issued, and the lifetime of the token.
 type Payload struct {
@@ -121,8 +148,8 @@ type Payload struct {
 	Iat   int64  `json:"iat"`             // the time the assertion was issued (seconds since Unix epoch)
 	Typ   string `json:"typ,omitempty"`   // token type (Optional).
 	// Email for which the application is requesting delegated access (Optional).
-	Sub            string `json:"sub,omitempty"`
-	privatePayload map[string]interface{}
+	Sub            string                 `json:"sub,omitempty"`
+	privatePayload map[string]interface{} `json:"-"`
 }
 
 // Set ...
@@ -154,14 +181,6 @@ func (c *Payload) Encode() (string, error) {
 	prv, err := json.Marshal(c.privatePayload)
 	if err != nil {
 		return "", fmt.Errorf("invalid map of private payload")
-	}
-
-	// Concatenate public and private arguments JSON objects.
-	if !bytes.HasSuffix(b, []byte{'}'}) {
-		return "", fmt.Errorf("invalid JSON %s", b)
-	}
-	if !bytes.HasPrefix(prv, []byte{'{'}) {
-		return "", fmt.Errorf("invalid JSON %s", prv)
 	}
 	b[len(b)-1] = ','         // Replace closing curly brace with a comma.
 	b = append(b, prv[1:]...) // Append private payload.
@@ -210,14 +229,6 @@ func (h *Header) Encode() (string, error) {
 	prv, err := json.Marshal(h.privateHeader)
 	if err != nil {
 		return "", fmt.Errorf("invalid map of private header")
-	}
-
-	// Concatenate public and private claim JSON objects.
-	if !bytes.HasSuffix(b, []byte{'}'}) {
-		return "", fmt.Errorf("invalid JSON %s", b)
-	}
-	if !bytes.HasPrefix(prv, []byte{'{'}) {
-		return "", fmt.Errorf("invalid JSON %s", prv)
 	}
 	b[len(b)-1] = ','         // Replace closing curly brace with a comma.
 	b = append(b, prv[1:]...) // Append private Header.

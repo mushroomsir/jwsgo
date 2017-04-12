@@ -11,49 +11,51 @@ go get github.com/mushroomsir/jwsgo
 ```
 
 ## Feature
-- Support HS256, HS384, HS512 algorithms
-- Support custom algorithm for encrypt data
-- Easy to unstand and use
+- HMAC signatures with HS256, HS384 and HS512.
+- Support custom algorithm for encrypt data.
+- Support custom Header
+- Easy to understand and use.
 
 ## API
 ### Basic usage
-NewSha256 create the jws instance with HMAC-SHA256:
+NewSha256 create the jws instance with HMAC-SHA256.
 ```go
-    jws:=jwsgo.NewSha256("Secret-key")
-    //or NewSha512, NewSha384
-```
-Then create an payload :
-```go
-    payload := &Payload{
-        Iss: "http://google.com/",
-        Exp: 3610,
-        Iat: 10,
-    }
-```
-You can also add some extra fileds by:
-```go
-    payload.Set("userid", "123456")
-```
-Then encode this payload and get token:
-```go
-    token,err:=jws.Encode(payload)
+// or NewSha512, NewSha384
+jws:=jwsgo.NewSha256("Secret-key")
+
+// create the payload
+payload := &Payload{
+    Iss: "http://google.com/",
+    Exp: 3610,
+    Iat: 10,
+}
+
+// You can also add some extra fileds
+payload.Set("userid", "123456")
+
+// encode this payload and get token
+token,err := jws.Encode(payload)
+
+// decode token
+playload,err := jws.Decode(token)
+
 ```
 ### Custom Header
-you can even make own Header with custom value:
+you can even make own Header with custom value.
 ```go
-    header := &Header{
-        Algorithm: "HS1",
-    }
-    header.Set("id", "mushroom")
-    token, err := jws.EncodeWith(header, payload)
+header := &Header{
+    Algorithm: "HS1",
+}
+header.Set("id", "mushroom")
+token, err := jws.EncodeWith(header, payload)
 ```
 ### Custom algorithm
-use new Func with custom hash func and algorithm's name
+use custom hash func for encrypt data.
 ```go
-    hasher:=func(data string) []byte {
-        h := hmac.New(sha1.New, []byte("xx"))
-        h.Write([]byte(data))
-        return h.Sum(nil)
-    }
-    jws := New("HS256",hasher)
+hasher := func(data string) []byte {
+    h := hmac.New(sha1.New, []byte("xx"))
+    h.Write([]byte(data))
+    return h.Sum(nil)
+}
+jws := New("HS256",hasher)
 ```
